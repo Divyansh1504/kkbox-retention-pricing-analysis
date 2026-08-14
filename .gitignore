@@ -1,0 +1,38 @@
+# Data (never commit competition data — see data/README.md)
+data/*
+!data/download_data.py
+!data/README.md
+
+# Kaggle / any credential file
+kaggle.json
+*.json.credentials
+.kaggle/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+*.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Figures are tracked selectively — keep the directory but ignore scratch output
+figures/*.tmp.png
