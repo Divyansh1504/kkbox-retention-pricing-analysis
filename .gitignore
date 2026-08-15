@@ -1,6 +1,5 @@
 # Data (never commit competition data — see data/README.md)
 data/*
-!data/download_data.py
 !data/README.md
 
 # Kaggle / any credential file

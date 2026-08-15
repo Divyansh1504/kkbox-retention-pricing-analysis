@@ -92,13 +92,33 @@ def assign_cohort(members: pd.DataFrame) -> pd.DataFrame:
 
 
 def cohort_sizes(members_with_cohort: pd.DataFrame) -> pd.Series:
+    """Registered members per cohort month — includes members who never
+    subscribed at all. NOT the right denominator for a retention rate; use
+    `_transacting_cohort_sizes` for that. Kept for callers that genuinely want
+    registration counts (e.g. reporting overall registered-population growth).
+    """
     return members_with_cohort.groupby("cohort_month")["msno"].nunique()
+
+
+def _transacting_cohort_sizes(
+    periods: pd.DataFrame, members_with_cohort: pd.DataFrame
+) -> pd.Series:
+    """Members per cohort month who ever appear in `periods` at least once —
+    i.e. ever had a subscription transaction. Most registered members in
+    `members_v3.csv` never subscribed at all (registration doesn't require
+    payment), so `cohort_sizes` massively overstates the population a
+    retention rate should be measured against."""
+    merged = periods.merge(
+        members_with_cohort[["msno", "cohort_month"]], on="msno", how="inner"
+    )
+    return merged.groupby("cohort_month")["msno"].nunique()
 
 
 def cohort_retention_curve(
     periods: pd.DataFrame, members_with_cohort: pd.DataFrame, max_cycle: int = 12
 ) -> pd.DataFrame:
-    """Fraction of each registration cohort still renewing at each subscription cycle.
+    """Fraction of each registration cohort's SUBSCRIBERS (not all registrants)
+    still renewing at each subscription cycle.
 
     The x-axis is subscription CYCLE number (1st period, 2nd period, ...), not
     calendar month: payment_plan_days varies across users (30 / 90 / 365-day
@@ -106,6 +126,14 @@ def cohort_retention_curve(
     tenure across everyone. Reaching cycle k only requires a row existing at
     that period_seq, so this uses the full periods table (censoring doesn't
     apply here — it's a fact about the data, not an inferred outcome).
+
+    The denominator is each cohort's TRANSACTING population (members who ever
+    had at least one subscription transaction), not its full registered
+    population — most registered members in this dataset never subscribed at
+    all, and dividing by them would conflate registration-to-subscription
+    conversion with subscription retention, two different business questions.
+    At cycle 1 this makes every cohort start at 100% by construction, which is
+    correct: everyone counted in the denominator transacted at least once.
 
     Cohorts registered close to the data cutoff will show artificially low
     retention at higher cycle numbers simply because they haven't had time to
@@ -123,7 +151,7 @@ def cohort_retention_curve(
         .rename("n_reached")
         .reset_index()
     )
-    sizes = cohort_sizes(members_with_cohort)
+    sizes = _transacting_cohort_sizes(periods, members_with_cohort)
     reached["cohort_size"] = reached["cohort_month"].map(sizes)
     reached["retention_rate"] = reached["n_reached"] / reached["cohort_size"]
     return reached
@@ -148,6 +176,32 @@ def cohort_revenue_summary(
         .unstack(fill_value=0)
     )
     return summary
+
+
+def cohort_calendar_eligible(
+    members_with_cohort: pd.DataFrame,
+    cycle: int,
+    observation_end: pd.Timestamp,
+    cycle_length_days: int = 30,
+) -> pd.Index:
+    """Cohort months old enough, in calendar time, to plausibly have reached
+    `cycle` renewal cycles by `observation_end` — using the dominant 30-day
+    plan length as the reference cycle length (the large majority of
+    transactions are on 30-day plans; see notebook 01).
+
+    This is a stricter, calendar-time-based alternative to
+    `cohort_max_reachable_cycle`: asking whether ANY single user in a cohort
+    reached a given cycle lets a handful of atypical fast-cycling users
+    (short plans, rapid repeat transactions) pass the bar long before the
+    cohort as a whole has had time to — which then biases that cohort's
+    reported retention at that cycle toward only its most unusual members,
+    not a representative slice. Use this for any comparison across cohorts of
+    different ages; `cohort_max_reachable_cycle` remains useful as a
+    per-user, data-driven diagnostic on its own.
+    """
+    sizes = cohort_sizes(members_with_cohort)
+    min_age = pd.DateOffset(days=cycle * cycle_length_days)
+    return sizes.index[sizes.index + min_age <= observation_end]
 
 
 def cohort_max_reachable_cycle(
