@@ -144,7 +144,7 @@ figures/     key charts, exported as PNG when the notebooks are run
 python -m venv .venv
 source .venv/bin/activate   # .venv\Scripts\activate on Windows
 pip install -r requirements.txt
-# place the three CSVs in data/ — see "Data" above
+# place the four CSVs in data/ — see "Data" above
 jupyter notebook
 ```
 
@@ -272,8 +272,12 @@ natural first target.
 ### Finding 2: Trial-to-paid conversion has collapsed, independent of trial volume
 
 Trial-first-transaction survival to cycle 6 fell from **6.20% to 2.98%** — a **52% relative
-decline** (z=26.81, p=2.2e-158) — while trial share of the transacting population grew from
-28.5% to 38.6% over the same period. These are two different problems.
+decline** (z=26.81, p=2.2e-158) — while trial share of each era's **full transacting cohort**
+grew from 28.5% to 38.6% over the same period. (This is the acquisition-mix figure. A different,
+narrower population — users eligible for the cycle-6 comparison specifically, i.e. not still
+censored/pending at that cycle — gives a different, non-comparable ratio (30.5% -> 41.8%); see
+notebook 02's explicit note on why these two are not interchangeable.) These are two different
+problems.
 
 **Confidence: high** that the conversion *rate* fell, not just trial count. **Directional only**
 on cause — this data can't separate an acquisition-channel/targeting shift from a trial-quality
@@ -294,7 +298,10 @@ at only **58%**.
 discounts (their share *drops* after a prior cancellation) and so is an annual-plan artifact
 (99.998% on the same 30-day plan as the comparison group). **Not causal:** who receives or takes
 a genuine discount still isn't random, so this is the best-adjusted observational estimate this
-data supports, not a proven price effect.
+data supports, not a proven price effect. **Limitation:** ruling out at-risk targeting isn't the
+same as ruling out selection more broadly — the assignment mechanism behind `genuine_discount` is
+unobserved, and if it's allocated through a promotional campaign aimed at a particular segment,
+the 99% renewal partly reflects who was selected rather than the discount's effect.
 
 **Recommend:** pilot a randomized ~20%-off offer on a held-out segment before committing pricing
 strategy to it. Don't expand free/comp'd grants as a retention tool — they're already a reactive,
