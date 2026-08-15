@@ -2,15 +2,26 @@
 
 The central question: does discounting buy retention, or just give up margin?
 
-The naive approach — correlate discount depth with renewal — is confounded in
-a specific, predictable direction: retention offers are disproportionately
-given to users the business already suspects are about to leave. If that's
-happening, deep discounts will correlate with LOWER apparent retention even
-if the discount itself has a small positive effect, because the discounted
-population was riskier to begin with. Every function below that reports a
-discount-retention relationship is paired with a check for this, and results
-are labeled `descriptive` vs `adjusted` throughout — never asserted as causal
-outright.
+Two separate confounds get tested here, not one:
+
+1. **Targeting.** Retention offers are disproportionately given to users the
+   business already suspects are about to leave. If that's happening, deep
+   discounts will correlate with LOWER apparent retention even if the
+   discount itself has a small positive effect, because the discounted
+   population was riskier to begin with.
+2. **Discount depth is not one thing.** Naive "discount depth" (list price
+   minus paid amount, as a percentage) silently conflates two very different
+   transaction types: a GENUINE partial discount (the user paid something,
+   just less than list) and a FREE / comp'd grant (the user paid nothing at
+   all on an otherwise real, priced plan). In this data these turn out to
+   have very different renewal signatures — see `add_price_category` — so
+   treating "discount depth" as one continuous, dose-response scale silently
+   averages together two different business mechanisms with opposite
+   signals.
+
+Every function below that reports a discount-retention relationship is
+paired with a check for one or both of these, and results are labeled
+`descriptive` vs `adjusted` throughout — never asserted as causal outright.
 """
 from __future__ import annotations
 
@@ -26,6 +37,30 @@ def add_discount_bucket(periods: pd.DataFrame) -> pd.DataFrame:
     out = periods.copy()
     out["discount_bucket"] = pd.cut(
         out["discount_depth"].clip(lower=0), bins=DISCOUNT_BINS, labels=DISCOUNT_LABELS
+    )
+    return out
+
+
+def add_price_category(periods: pd.DataFrame) -> pd.DataFrame:
+    """Splits priced periods (plan_list_price > 0) into three clean,
+    non-overlapping categories that naive `discount_depth` bucketing
+    conflates:
+
+    - `full_price`: paid at (or within 0.1% of) list price.
+    - `genuine_discount`: paid something, but less than list price. In this
+      dataset these cluster tightly around ~20% off — a fixed promotional
+      price point, not a continuum — and renew at ~99%.
+    - `free_grant`: paid exactly NT$0 on an otherwise real, priced plan. Not
+      a discount in any normal pricing sense — this is 65% of what naive
+      `discount_depth > 0` bucketing would call "discounted," and it renews
+      at ~58%, dragging down every high-discount-depth bucket in a way that
+      has nothing to do with genuine discounting.
+    """
+    out = periods[periods["plan_list_price"] > 0].copy()
+    out["price_category"] = np.select(
+        [out["discount_depth"] <= 0.001, out["actual_amount_paid"] == 0],
+        ["full_price", "free_grant"],
+        default="genuine_discount",
     )
     return out
 

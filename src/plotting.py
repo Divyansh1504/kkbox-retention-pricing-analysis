@@ -100,9 +100,13 @@ def _finalize(ax, title: str, xlabel: str = "", ylabel: str = "") -> None:
 
 
 def plot_cohort_retention_lines(
-    pivot: "pd.DataFrame", title: str, max_series: int = 8, save_path: str | None = None
+    pivot: "pd.DataFrame",
+    title: str,
+    max_series: int = 8,
+    save_path: str | None = None,
+    ylabel: str = "Cohort still renewing",
 ):
-    """pivot: index=cycle, columns=cohort label, values=retention_rate.
+    """pivot: index=cycle, columns=cohort label, values=a 0-1 rate (survival_rate or reach_rate).
     Caps at `max_series` lines (fixed categorical order) — for more cohorts
     than that, use `plot_cohort_heatmap` instead."""
     set_style()
@@ -116,7 +120,7 @@ def plot_cohort_retention_lines(
 
     ax.set_ylim(0, 1)
     ax.yaxis.set_major_formatter(lambda y, _: f"{y:.0%}")
-    _finalize(ax, title, "Subscription cycle", "Cohort still renewing")
+    _finalize(ax, title, "Subscription cycle", ylabel)
     ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.0))
     fig.tight_layout()
     if save_path:

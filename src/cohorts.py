@@ -114,47 +114,167 @@ def _transacting_cohort_sizes(
     return merged.groupby("cohort_month")["msno"].nunique()
 
 
-def cohort_retention_curve(
-    periods: pd.DataFrame, members_with_cohort: pd.DataFrame, max_cycle: int = 12
+def cohort_survival_curve(
+    periods: pd.DataFrame,
+    members_with_cohort: pd.DataFrame,
+    max_cycle: int = 12,
+    group_col: str = "cohort_month",
 ) -> pd.DataFrame:
-    """Fraction of each registration cohort's SUBSCRIBERS (not all registrants)
-    still renewing at each subscription cycle.
+    """HEADLINE retention metric for this repo: true cumulative survival —
+    the fraction of each group's transacting population still CONTINUOUSLY
+    subscribed through cycle N. "Continuous" means periods 1..N-1 were ALL
+    renewed, with no lapse or voluntary cancellation anywhere in the chain.
+    A user who lapses and later reactivates does NOT count as a survivor
+    here — see `cohort_survival_and_reach` for the more lenient,
+    reactivation-inclusive "reach" number reported alongside this one, and
+    the gap between the two (itself a reportable quantity: how much of
+    "reach" is win-back rather than continuous renewal).
 
-    The x-axis is subscription CYCLE number (1st period, 2nd period, ...), not
-    calendar month: payment_plan_days varies across users (30 / 90 / 365-day
-    plans), so a fixed cycle count doesn't correspond to a fixed calendar
-    tenure across everyone. Reaching cycle k only requires a row existing at
-    that period_seq, so this uses the full periods table (censoring doesn't
-    apply here — it's a fact about the data, not an inferred outcome).
+    `group_col` defaults to `cohort_month` (registration cohort) but can be
+    any column present in `members_with_cohort` — e.g. a combined
+    cohort-era x acquisition-channel label, to test whether a retention
+    difference between two groups survives controlling for a third factor.
 
-    The denominator is each cohort's TRANSACTING population (members who ever
-    had at least one subscription transaction), not its full registered
-    population — most registered members in this dataset never subscribed at
-    all, and dividing by them would conflate registration-to-subscription
-    conversion with subscription retention, two different business questions.
-    At cycle 1 this makes every cohort start at 100% by construction, which is
-    correct: everyone counted in the denominator transacted at least once.
-
-    Cohorts registered close to the data cutoff will show artificially low
-    retention at higher cycle numbers simply because they haven't had time to
-    reach them yet — filter to a common comparison horizon before charting.
+    Right-censoring is handled by EXCLUSION, not by counting a still-pending
+    subscription as a failure. Every user's *last* period always has
+    `renewed == False` by construction (renewed requires a next period to
+    exist), so a user's first non-renewed period is either a confirmed
+    failure (lapsed_no_renewal / voluntary_cancel) or, if it's their very
+    last period and still inside its renewal window, `censored` —
+    unresolved, not a failure. Users whose first failure is a censored
+    period before cycle N are excluded from cycle N's denominator entirely,
+    matching the censoring discipline used everywhere else in this module.
     """
     merged = periods.merge(
-        members_with_cohort[["msno", "cohort_month"]], on="msno", how="inner"
+        members_with_cohort[["msno", group_col]], on="msno", how="inner"
     )
-    merged["cycle"] = merged["period_seq"] + 1
+    not_renewed = merged.loc[
+        ~merged["renewed"], ["msno", group_col, "period_seq", "outcome"]
+    ]
+    # every user has >=1 row here: their last period always has renewed == False
+    first_failure = (
+        not_renewed.sort_values("period_seq")
+        .groupby("msno", as_index=False)
+        .first()
+        .rename(columns={"period_seq": "first_failure_seq"})
+    )
 
-    reached = (
-        merged[merged["cycle"] <= max_cycle]
-        .groupby(["cohort_month", "cycle"])["msno"]
-        .nunique()
-        .rename("n_reached")
-        .reset_index()
+    rows = []
+    for cycle in range(1, max_cycle + 1):
+        threshold = cycle - 1  # survived cycle N iff periods 0..N-2 (indices) all renewed
+        survived_mask = first_failure["first_failure_seq"] >= threshold
+        excluded_mask = (~survived_mask) & (first_failure["outcome"] == "censored")
+        eval_pop = first_failure.loc[~excluded_mask].copy()
+        eval_pop["survived"] = eval_pop["first_failure_seq"] >= threshold
+
+        g = eval_pop.groupby(group_col)["survived"]
+        cycle_summary = pd.DataFrame({"n_survived": g.sum(), "n_evaluated": g.size()})
+        cycle_summary["cycle"] = cycle
+        rows.append(cycle_summary.reset_index())
+
+    out = pd.concat(rows, ignore_index=True)
+    out["survival_rate"] = out["n_survived"] / out["n_evaluated"]
+    return out
+
+
+def cohort_survival_and_reach(
+    periods: pd.DataFrame,
+    members_with_cohort: pd.DataFrame,
+    max_cycle: int = 12,
+    group_col: str = "cohort_month",
+) -> pd.DataFrame:
+    """Survival (headline) and reach (reactivation-inclusive), computed on
+    the SAME evaluated population at each cycle so the two are directly
+    comparable.
+
+    Survival = continuously renewed through cycle N, no lapse or
+    cancellation anywhere in the chain (see `cohort_survival_curve` for the
+    standalone version, used for the full-history heatmap). Reach = ever
+    made it to an Nth transaction, by any path, including a user who lapsed
+    for months and later reactivated — more lenient, reported alongside
+    survival, never as a substitute.
+
+    `group_col` defaults to `cohort_month` (registration cohort) but can be
+    any column present in `members_with_cohort` — e.g. a combined
+    cohort-era x acquisition-channel label, to test whether a retention
+    difference between two groups survives controlling for a third factor.
+
+    These two use different denominators when computed separately (survival
+    excludes users whose fate is still censored/pending; reach doesn't need
+    to, since "does a period at cycle N exist" has no ambiguity) —
+    subtracting one rate from the other computed independently can come out
+    negative, which looks like a contradiction but is really just a
+    population mismatch. This function avoids that trap by computing both
+    against one shared, correctly censoring-aware population per cycle, so:
+    `reactivation_gap = reach_rate - survival_rate` is the share of the
+    evaluated cohort that reached cycle N via at least one win-back
+    reactivation along the way, rather than continuous renewal.
+    """
+    merged = periods.merge(
+        members_with_cohort[["msno", group_col]], on="msno", how="inner"
     )
-    sizes = _transacting_cohort_sizes(periods, members_with_cohort)
-    reached["cohort_size"] = reached["cohort_month"].map(sizes)
-    reached["retention_rate"] = reached["n_reached"] / reached["cohort_size"]
-    return reached
+    user_info = merged.groupby("msno").agg(
+        **{group_col: (group_col, "first")}, max_period_seq=("period_seq", "max")
+    )
+
+    not_renewed = merged.loc[~merged["renewed"], ["msno", "period_seq", "outcome"]]
+    first_failure = (
+        not_renewed.sort_values("period_seq")
+        .groupby("msno")
+        .first()
+        .rename(columns={"period_seq": "first_failure_seq"})
+    )
+    user_info = user_info.join(first_failure[["first_failure_seq", "outcome"]])
+
+    rows = []
+    for cycle in range(1, max_cycle + 1):
+        threshold = cycle - 1
+        survived_mask = user_info["first_failure_seq"] >= threshold
+        excluded_mask = (~survived_mask) & (user_info["outcome"] == "censored")
+        eval_pop = user_info.loc[~excluded_mask].copy()
+        eval_pop["survived"] = eval_pop["first_failure_seq"] >= threshold
+        eval_pop["reached"] = eval_pop["max_period_seq"] >= threshold
+
+        g = eval_pop.groupby(group_col)
+        cycle_summary = pd.DataFrame(
+            {
+                "n_survived": g["survived"].sum(),
+                "n_reached": g["reached"].sum(),
+                "n_evaluated": g["survived"].size(),
+            }
+        )
+        cycle_summary["cycle"] = cycle
+        rows.append(cycle_summary.reset_index())
+
+    out = pd.concat(rows, ignore_index=True)
+    out["survival_rate"] = out["n_survived"] / out["n_evaluated"]
+    out["reach_rate"] = out["n_reached"] / out["n_evaluated"]
+    out["reactivation_gap"] = out["reach_rate"] - out["survival_rate"]
+    return out
+
+
+def first_transaction_trial_flag(
+    periods: pd.DataFrame, plan_days_threshold: int = 14, price_threshold: float = 10.0
+) -> pd.DataFrame:
+    """Flags each user's FIRST transaction as trial/promotional if its
+    `payment_plan_days` is short (<= plan_days_threshold) or its
+    `actual_amount_paid` is near-zero (<= price_threshold NT$). One row per
+    msno, for joining into any cohort-level split.
+
+    These thresholds are a starting operational definition for testing
+    whether acquisition mix (trial vs. full-price signups) explains a
+    retention difference between cohorts — notebooks 03/04 characterize the
+    short-plan and low-price populations in more depth and may refine this.
+    """
+    first_txn = (
+        periods.sort_values(["msno", "period_seq"])
+        .groupby("msno", as_index=False)
+        .first()[["msno", "payment_plan_days", "actual_amount_paid", "plan_list_price"]]
+    )
+    first_txn["is_trial_first_txn"] = (first_txn["payment_plan_days"] <= plan_days_threshold) | (
+        first_txn["actual_amount_paid"] <= price_threshold
+    )
+    return first_txn
 
 
 def cohort_revenue_summary(

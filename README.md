@@ -124,6 +124,45 @@ window to know the answer yet are marked **censored** and excluded from every ra
 downstream — without this, recent cohorts would look like they churn faster purely because
 there hasn't been time to observe their renewals, not because they actually churn more.
 
+### Three retention metrics — read this before trusting any number in notebook 02
+
+An earlier draft of this repo conflated three different metrics under the word "retention" and
+reported a "cycle 6 retention" of 94.3% vs. 97.7% that was actually none of them — a conditional
+renewal rate computed over an already-survivor-selected population. That number is gone from
+every notebook, chart, and this file. In its place, three explicitly distinct metrics:
+
+- **Survival (the headline metric).** The fraction of a cohort's transacting population still
+  CONTINUOUSLY subscribed through cycle N — every period from 1 to N-1 renewed, no lapse or
+  cancellation anywhere in the chain. This is what "retention" means everywhere in this repo
+  unless stated otherwise (`cohorts.cohort_survival_curve`). It correctly excludes users whose
+  fate is still censored/pending rather than counting them as failures.
+- **Reach (reactivation-inclusive, reported alongside survival, never as a substitute).** The
+  fraction that EVER made it to an Nth transaction by any path, including a user who lapsed for
+  months and came back. Always >= survival for the same population. The gap between the two
+  (`reactivation_gap` in `cohorts.cohort_survival_and_reach`) is itself a finding: it quantifies
+  how much of a cohort's apparent longevity is win-back rather than uninterrupted renewal.
+- **Revenue retained/lost.** A different question again — total resolved-period revenue across a
+  user's *entire* tenure (every cycle mixed), split by whether each bill renewed. It is not
+  cycle-gated and does not reconcile numerically with the survival curve — notebook 02 stress-tests
+  this explicitly rather than assuming the two agree.
+
+The naive per-user "did they reach cycle N" check (a handful of atypical fast-cycling users
+technically reaching cycle 6 within days) also needed a calendar-time eligibility rule instead of
+a per-user reachability check — see `cohorts.cohort_calendar_eligible` — otherwise a cohort can
+pass the eligibility bar via a handful of outliers while the rest of it hasn't had time yet,
+producing a fake cliff to 0% in exactly the cohorts the eligibility filter was meant to protect.
+
+### The central finding: acquisition mix, not cohort age, drives the retention trend
+
+The headline (uncontrolled) survival comparison shows recent cohorts retaining WORSE than older
+ones. That reverses once the population is split by whether a user's first transaction was
+trial/promotional (short plan and/or a near-zero first payment): among non-trial, full-price
+signups specifically, RECENT cohorts retain significantly BETTER. Recent cohorts simply include a
+much larger share of trial signups, which convert to long-term subscribers at a very low rate —
+blending that into the aggregate drags the headline number down even though real paying
+subscribers are doing better than ever. See notebook 02's trial-mix section and notebook 04's
+direct characterization of the 7-day plan / payment method 35 trial mechanism.
+
 ### Leakage guard in the predictive model (notebook 05)
 
 The obvious way to build a feature table — join each user's most recent transaction to their
@@ -138,16 +177,32 @@ importance both with and without the leaky features so the gap is visible rather
 
 Every claimed effect in the notebooks is either backed by a significance test (chi-square,
 Mann-Whitney U, two-proportion z-test, or a logistic regression coefficient with a p-value) or
-explicitly labeled descriptive-only. Two confounds get particular attention because they'd
+explicitly labeled descriptive-only. Several confounds get particular attention because they'd
 otherwise flip the sign of the headline finding:
 
-- **Discounting** (notebook 03): discounts may be targeted at users already flagged as at-risk
-  (retention offers), which would make a naive discount-vs-retention correlation look negative
-  even if discounting itself helps. The notebook tests for this targeting directly rather than
-  reporting the naive correlation as an effect.
-- **Auto-renew / plan length / payment method** (notebook 04): users who opt into these are
-  self-selected, likely lower-churn-propensity populations to begin with. Associations are
-  reported as descriptive segmentation, not as levers proven to work if pulled on a different
+- **Discount targeting** (notebook 03): retention offers may be targeted at users already
+  flagged as at-risk, which would make a naive discount-vs-retention correlation look negative
+  even if discounting itself helps.
+- **Discount depth conflates two mechanisms** (notebook 03): naive "discount depth" silently
+  averages together `free_grant` (paid NT$0 on a real, priced plan — 65% of everything a naive
+  calculation calls "discounted," renews at ~58%, and IS the at-risk retention-save mechanism)
+  and `genuine_discount` (paid something, clustered tightly around one ~20%-off price point,
+  renews at ~99%, and is *not* targeted at at-risk users — its share actually drops after a prior
+  cancellation). These have opposite signals and were never on one dose-response curve; treating
+  them as one "discount depth" scale produces the misleading naive chart. `src/pricing.py`'s
+  `add_price_category` splits them explicitly.
+- **`plan_list_price` / `payment_plan_days` collinearity** (notebook 04): correlated at r=0.96 —
+  longer plans cost more, almost mechanically. `plan_list_price` is dropped from the regression
+  entirely rather than kept in with a caveat; a caveat doesn't make an unstable, uninterpretable
+  coefficient (an earlier draft got -11.6 per NT$1000) trustworthy. `payment_plan_days` is kept
+  as the plan-length control.
+- **7-day plans and payment method 35 are trial mechanisms, not underperforming paid products**
+  (notebook 04): 98.7% of 7-day-plan periods and 99.9998% of payment-method-35 periods are paid
+  NT$0. Their low "renewal rate" is a trial-to-paid conversion rate, a different business metric
+  with different benchmarks — not evidence that a paid product is failing.
+- **Auto-renew / plan length / payment method more broadly** (notebook 04): users who opt into
+  these are self-selected, likely lower-churn-propensity populations to begin with. Associations
+  are reported as descriptive segmentation, not as levers proven to work if pulled on a different
   user.
 
 ## Recommendation Memo
