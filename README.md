@@ -9,11 +9,56 @@ subscription business losing revenue, which levers actually retain subscribers, 
 should the company do about it?* A predictive model appears in [notebook 05](notebooks/05_churn_model.ipynb),
 as one section near the end — not the centerpiece.
 
-> **Status:** the analysis code in `src/` and `notebooks/` is complete and has been checked for
-> syntax and logical consistency. The
-> [Recommendation Memo](#recommendation-memo) section is a template — run notebooks `01`–`05` in
-> order, then replace the bracketed placeholders with the actual output before treating this as
-> a finished writeup.
+> **Status:** all five notebooks have been executed end-to-end against the full dataset. The
+> [Recommendation Memo](#recommendation-memo) below reflects the actual output, not a template.
+
+## Key findings
+
+The two strongest results in this repo — read these first.
+
+### 1. Acquisition mix reverses the retention trend (Simpson's paradox)
+
+The uncontrolled, cohort-age comparison says recent cohorts retain **worse**: cumulative
+survival to the 6th subscription cycle is 48.7% for cohorts registered in 2014 vs. 44.4% for
+cohorts registered in 2016 (z=23.68, p=5.2e-124, on 118,918 and 218,319 evaluated users). Taken
+at face value, that's a "the product is getting worse at keeping people" story.
+
+**It reverses once acquisition mix is controlled for.** Splitting each era by whether the user's
+first transaction was trial/promotional (a short plan and/or a near-zero first payment) shows:
+
+| First transaction | 2014 cohorts | 2016 cohorts | z | p |
+|---|---|---|---|---|
+| Trial | 6.20% | 2.98% | 26.81 | 2.2e-158 |
+| **Non-trial (paying)** | 67.34% | **74.24%** | -34.21 | 1.7e-256 |
+
+Among real, paying subscribers, **recent cohorts retain significantly better**. The aggregate
+decline is a composition effect: recent cohorts simply include a much larger share of trial
+signups, a population that converts to long-term subscribers at a low rate almost by
+definition, and blending that into the aggregate drags the headline number down even though the
+paying-subscriber product is doing better than ever.
+
+This was stress-tested, not just asserted: a 2016 registrant on a long plan can't resolve 6
+cycles before the March 2017 data cutoff, so the late-era non-trial sample eligible for
+comparison skews toward monthly subscribers relative to the 2014 sample. Restricting **both**
+eras to exactly the same 30-day plan (removing that skew entirely rather than just noting it)
+gives 67.7% -> 75.6% — the finding survives strict matching and gets slightly stronger, not
+weaker. See `notebooks/02_retention_cohorts.ipynb` for the full derivation, including the
+reversal, the matched re-test, and a separate finding that trial-to-paid conversion itself is
+declining (6.20% -> 2.98%, a 52% relative drop) — a distinct problem from "there are more
+trials now," addressed separately in the memo below.
+
+### 2. The obvious way to build the churn model leaks — demonstrated, then fixed
+
+Joining each user's most recent transaction to their churn label is the standard approach for
+this dataset, and it's wrong: for a churned user, that transaction is often the cancellation
+itself. `notebooks/05_churn_model.ipynb` demonstrates this concretely before fixing it —
+`is_cancel` on the latest-ever transaction alone separates churn at 84.0% vs. 6.6%, and a model
+built on that kind of feature reaches **AUC 0.981**. A model built with a hard time cutoff
+(features strictly before the label window, no post-hoc transaction allowed in) drops to **AUC
+0.875** — still a strong, legitimate result using only plan/pricing/demographic data, but the
+0.106 AUC gap is the leaked model's "skill" evaporating once the label stops leaking through the
+features. Both models are reported side by side with their feature-importance rankings so the
+gap is visible, not just asserted.
 
 ## Data
 
@@ -152,16 +197,9 @@ a per-user reachability check — see `cohorts.cohort_calendar_eligible` — oth
 pass the eligibility bar via a handful of outliers while the rest of it hasn't had time yet,
 producing a fake cliff to 0% in exactly the cohorts the eligibility filter was meant to protect.
 
-### The central finding: acquisition mix, not cohort age, drives the retention trend
-
-The headline (uncontrolled) survival comparison shows recent cohorts retaining WORSE than older
-ones. That reverses once the population is split by whether a user's first transaction was
-trial/promotional (short plan and/or a near-zero first payment): among non-trial, full-price
-signups specifically, RECENT cohorts retain significantly BETTER. Recent cohorts simply include a
-much larger share of trial signups, which convert to long-term subscribers at a very low rate —
-blending that into the aggregate drags the headline number down even though real paying
-subscribers are doing better than ever. See notebook 02's trial-mix section and notebook 04's
-direct characterization of the 7-day plan / payment method 35 trial mechanism.
+See [Key findings](#key-findings) above for the acquisition-mix reversal (Simpson's paradox) and
+the leakage demonstration — the two most load-bearing results in this repo, including the
+plan-length-matched robustness check and the separate trial-conversion-decline finding.
 
 ### Leakage guard in the predictive model (notebook 05)
 
@@ -169,7 +207,7 @@ The obvious way to build a feature table — join each user's most recent transa
 label — leaks. For a churned user, the most recent transaction is often the cancellation itself,
 or a transaction whose `membership_expire_date` falls exactly in the labeled expiry window; both
 are downstream of the outcome, not predictors of it. Notebook 05 demonstrates this concretely
-(a naive `is_cancel`-from-latest-transaction feature alone separates churn at 78.7% vs. 4.4%)
+(a naive `is_cancel`-from-latest-transaction feature alone separates churn at 84.0% vs. 6.6%)
 before fixing it: a hard cutoff, **`CUTOFF_DATE = 2017-02-01`** (the start of the labeled expiry
 month), restricts every feature to transactions strictly before it, and reports feature
 importance both with and without the leaky features so the gap is visible rather than asserted.
@@ -190,7 +228,11 @@ otherwise flip the sign of the headline finding:
   renews at ~99%, and is *not* targeted at at-risk users — its share actually drops after a prior
   cancellation). These have opposite signals and were never on one dose-response curve; treating
   them as one "discount depth" scale produces the misleading naive chart. `src/pricing.py`'s
-  `add_price_category` splits them explicitly.
+  `add_price_category` splits them explicitly. Checked and rejected: `genuine_discount` is not an
+  annual-plan commitment effect in disguise (a pay-12-get-14 structure would mechanically inflate
+  a per-decision renewal rate) — 99.998% of `genuine_discount` periods are on the same 30-day plan
+  as the comparison groups, so the ~99% renewal is a same-plan-length price effect, not a
+  plan-length artifact.
 - **`plan_list_price` / `payment_plan_days` collinearity** (notebook 04): correlated at r=0.96 —
   longer plans cost more, almost mechanically. `plan_list_price` is dropped from the regression
   entirely rather than kept in with a caveat; a caveat doesn't make an unstable, uninterpretable
@@ -207,17 +249,56 @@ otherwise flip the sign of the headline finding:
 
 ## Recommendation Memo
 
-*Template — replace the bracketed items below with the actual output of notebooks 02–05, in
-priority order, before publishing this repo as a finished piece.*
+**To leadership — what this analysis found and what to do about it.**
 
-| # | Recommendation | Expected impact | Confidence |
-|---|---|---|---|
-| 1 | `[e.g. target retention offers at the segment identified in 04_segmentation.ipynb as carrying the largest revenue-at-risk]` | `[NT$ / % of at-risk revenue, from the segment table]` | `[High/Medium/Low — state why, e.g. "high: large sample, effect survives stratification"]` |
-| 2 | `[finding from 03_pricing_discounts.ipynb — only include if the adjusted (confound-controlled) result supports it]` | `[...]` | `[...]` |
-| 3 | `[finding from 02_retention_cohorts.ipynb — voluntary-cancel vs. silent-lapse mix, and which one to address]` | `[...]` | `[...]` |
+### Finding 1: Paying-subscriber retention is improving, not declining
 
-Confidence should reflect what notebooks 02–04 actually established: a descriptive association
-is not the same confidence level as a result that survived a stratified or confound-adjusted
-check. Where a section produced a null or weak result, say so here too — a memo that
-recommends against acting on a specific lever, because the data doesn't support it, is a more
-credible piece of work than one that finds a story everywhere it looks.
+Non-trial subscriber survival to the 6th billing cycle rose from **67.3% (2014 cohorts) to
+74.2% (2016 cohorts)** — confirmed under strict plan-length matching (67.7% → 75.6%), so this
+isn't a censoring artifact. The naive, unsegmented number says the opposite (48.7% → 44.4%)
+purely because recent cohorts include more trial signups; see Finding 2.
+
+**Confidence: high** that the reversal is real — huge samples, p < 1e-120, survives matching.
+**Directional only** on *why* paying retention improved; no causal driver is in this data.
+
+**Recommend:** don't let the aggregate number drive a "retention is declining" narrative or
+budget cut — the paying product is healthier than the headline suggests. Lost revenue in this
+population is **83% silent lapse vs. 17% voluntary cancellation**, and auto-renew subscribers
+retain at 95.6% vs. 68.7% manual-renew — so prioritize renewal reminders, grace periods, and
+auto-renew opt-in campaigns over reactive save-offer campaigns. **Expected impact: largest —**
+manual-renew, ≤31-day-plan subscribers carry NT$107M in lost revenue in the sampled cohorts, the
+natural first target.
+
+### Finding 2: Trial-to-paid conversion has collapsed, independent of trial volume
+
+Trial-first-transaction survival to cycle 6 fell from **6.20% to 2.98%** — a **52% relative
+decline** (z=26.81, p=2.2e-158) — while trial share of the transacting population grew from
+28.5% to 38.6% over the same period. These are two different problems.
+
+**Confidence: high** that the conversion *rate* fell, not just trial count. **Directional only**
+on cause — this data can't separate an acquisition-channel/targeting shift from a trial-quality
+change.
+
+**Recommend:** audit the trial funnel and its traffic sources directly; don't scale trial volume
+further without first understanding why conversion halved. **Expected impact: second** — a large
+and growing segment, so even a partial conversion recovery compounds.
+
+### Finding 3: Genuine discounting looks like a real, low-risk lever; free "goodwill" grants don't
+
+A genuine ~20%-off discount correlates with **98.9% renewal vs. 89.4% at full price** (adjusted
+odds ratio 7.87 vs. full price, controlling for plan length, auto-renew, and prior cancellation).
+Free/comp'd grants — paid NT$0, the other 65% of what a naive "discount" scale includes — renew
+at only **58%**.
+
+**Confidence: medium-high** for the association — at-risk targeting is ruled out for genuine
+discounts (their share *drops* after a prior cancellation) and so is an annual-plan artifact
+(99.998% on the same 30-day plan as the comparison group). **Not causal:** who receives or takes
+a genuine discount still isn't random, so this is the best-adjusted observational estimate this
+data supports, not a proven price effect.
+
+**Recommend:** pilot a randomized ~20%-off offer on a held-out segment before committing pricing
+strategy to it. Don't expand free/comp'd grants as a retention tool — they're already a reactive,
+at-risk-targeted mechanism, and they save only 58% of the accounts they're given to while
+forfeiting 100% of that revenue on the rest. **Expected impact: third, but directly testable** —
+unlike Findings 1-2, this one can be validated causally with a controlled experiment before any
+wider rollout.
