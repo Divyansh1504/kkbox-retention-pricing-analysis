@@ -253,7 +253,8 @@ otherwise flip the sign of the headline finding:
 
 ### Finding 1: Paying-subscriber retention is improving, not declining
 
-Non-trial subscriber survival to the 6th billing cycle rose from **67.3% (2014 cohorts) to
+*Metric: cumulative survival to the 6th billing cycle (continuous renewal, no lapse anywhere in
+the chain — see Methodology).* Non-trial subscriber survival rose from **67.3% (2014 cohorts) to
 74.2% (2016 cohorts)** — confirmed under strict plan-length matching (67.7% → 75.6%), so this
 isn't a censoring artifact. The naive, unsegmented number says the opposite (48.7% → 44.4%)
 purely because recent cohorts include more trial signups; see Finding 2.
@@ -262,22 +263,29 @@ purely because recent cohorts include more trial signups; see Finding 2.
 **Directional only** on *why* paying retention improved; no causal driver is in this data.
 
 **Recommend:** don't let the aggregate number drive a "retention is declining" narrative or
-budget cut — the paying product is healthier than the headline suggests. Lost revenue in this
-population is **83% silent lapse vs. 17% voluntary cancellation**, and auto-renew subscribers
-retain at 95.6% vs. 68.7% manual-renew — so prioritize renewal reminders, grace periods, and
-auto-renew opt-in campaigns over reactive save-offer campaigns. **Expected impact: largest —**
-manual-renew, ≤31-day-plan subscribers carry NT$107M in lost revenue in the sampled cohorts, the
-natural first target.
+budget cut — the paying product is healthier than the headline suggests. In the most recent
+12 eligible registration cohorts (Nov 2015 – Oct 2016 signups, NT$325M in resolved billing
+revenue), lost revenue is **83% silent lapse vs. 17% voluntary cancellation** — so prioritize
+renewal reminders, grace periods, and auto-renew opt-in campaigns over reactive save-offer
+campaigns. Auto-renew subscribers do retain far better than manual-renew (95.6% vs. 68.7%), but
+that gap is selection-confounded — users who opt into auto-renew were likely more committed to
+begin with, so converting a reluctant manual-renewer to auto-renew billing should be expected to
+close only part of that 27-point gap, not all of it; the recommendation rests on the
+silent-lapse finding independently, not on this number. **Expected impact: largest** — across the
+full historical dataset (all registration cohorts, 2004–2017, NT$3.09B in total billed revenue),
+manual-renew subscribers on plans ≤31 days are the single largest revenue-at-risk segment at
+**NT$107M in lost revenue**, the natural first target for a renewal-reminder or auto-renew push.
+*(This NT$107M is sized against the full 13-year dataset, a different and much larger scope than
+the NT$325M 12-cohort window above — the two are not nested and should not be added or compared
+directly; see notebook 04 for the full segment table.)*
 
 ### Finding 2: Trial-to-paid conversion has collapsed, independent of trial volume
 
-Trial-first-transaction survival to cycle 6 fell from **6.20% to 2.98%** — a **52% relative
-decline** (z=26.81, p=2.2e-158) — while trial share of each era's **full transacting cohort**
-grew from 28.5% to 38.6% over the same period. (This is the acquisition-mix figure. A different,
-narrower population — users eligible for the cycle-6 comparison specifically, i.e. not still
-censored/pending at that cycle — gives a different, non-comparable ratio (30.5% -> 41.8%); see
-notebook 02's explicit note on why these two are not interchangeable.) These are two different
-problems.
+*Metric: cumulative survival to the 6th billing cycle, same definition as Finding 1, computed
+separately within the trial-first-transaction population.* Survival fell from **6.20% to 2.98%**
+— a **52% relative decline** (z=26.81, p=2.2e-158) — while trial share of each era's full
+transacting cohort grew from 28.5% to 38.6% over the same period. These are two different
+problems: one is acquisition mix, the other is conversion quality within that mix.
 
 **Confidence: high** that the conversion *rate* fell, not just trial count. **Directional only**
 on cause — this data can't separate an acquisition-channel/targeting shift from a trial-quality
@@ -289,10 +297,12 @@ and growing segment, so even a partial conversion recovery compounds.
 
 ### Finding 3: Genuine discounting looks like a real, low-risk lever; free "goodwill" grants don't
 
-A genuine ~20%-off discount correlates with **98.9% renewal vs. 89.4% at full price** (adjusted
-odds ratio 7.87 vs. full price, controlling for plan length, auto-renew, and prior cancellation).
-Free/comp'd grants — paid NT$0, the other 65% of what a naive "discount" scale includes — renew
-at only **58%**.
+*Metric: per-period renewal rate (does this specific billing period lead to another one within
+30 days) — not cumulative survival, and not directly comparable to the percentages in Findings 1
+and 2.* A genuine ~20%-off discount correlates with **98.9% renewal vs. 89.4% at full price**
+(adjusted odds ratio 7.87 vs. full price, controlling for plan length, auto-renew, and prior
+cancellation). Free/comp'd grants — paid NT$0, the other 65% of what a naive "discount" scale
+includes — renew at only **58%**.
 
 **Confidence: medium-high** for the association — at-risk targeting is ruled out for genuine
 discounts (their share *drops* after a prior cancellation) and so is an annual-plan artifact
